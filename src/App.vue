@@ -103,9 +103,9 @@
       <dl class="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-3">
         <div
           class="bg-white overflow-hidden shadow rounded-lg border-purple-800 border-solid cursor-pointer"
-          v-for="t in filteredTickers()"
+          v-for="t in paginatedTickers"
           :class="{
-            'border-4': sel === t
+            'border-4': selectedTicker === t
           }"
           :key="t.name"
           @click="select(t)"
@@ -139,14 +139,14 @@
         
       </dl>
       <hr class="w-full border-t border-gray-600 my-4" />
-      <section class="relative" v-if="sel">
+      <section class="relative" v-if="selectedTicker">
         <h3 class="text-lg leading-6 font-medium text-gray-900 my-8">
-          {{sel.name}} - USD
+          {{selectedTicker.name}} - USD
         </h3>
         <div class="flex items-end border-gray-600 border-b border-l h-64">
-          <div class="bg-purple-800 border w-10" v-for="(g, idx) in normalizeGraph()" :key="idx" :style="{ height: `${g}%` }"></div>
+          <div class="bg-purple-800 border w-10" v-for="(g, idx) in normalizedGraph" :key="idx" :style="{ height: `${g}%` }"></div>
         </div>
-        <button type="button" class="absolute top-0 right-0" @click="sel = null">
+        <button type="button" class="absolute top-0 right-0" @click="selectedTicker = null">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             xmlns:xlink="http://www.w3.org/1999/xlink"
@@ -176,20 +176,38 @@
 </template>
 
 <script>
+// оценка критичностности от 1 - 5
+//[x] 6. Наличие в состоянии ЗАВИСИМЫХ ДАННЫХ | критичность: 5+
+//[ ] 4. запросы напрямую внутри компонента | критичность: 5
+//[ ] 5. Обработка ошибок | критичность: 5
+//[ ] 2. При удалении остается подписка на загрузку курса | критичность: 5
+//[ ] 3. количество запросов | критичность: 4
+//[x] 8. при удалении тикера не изменяется localStorage "у мен сделан???" | критичность: 4
+//[x] 1. одинаковый код watch | Критичность: 3
+//[ ] 9. localStorage и анонимные вкладки "локал сторадж не доступен???"| критичность: 3
+//[ ] 7. графика ужасно выглядить если будет много цен | критичность: 2
+//[ ] 10. Магические строки и числа (URL, задержки 5000, ключ локал стораджи "кажется константы?") | критичность: 1
+
+//параллельно
+//[x] график сломан если везде одинаковые значения
+//[x] при удалении тикера остается выбор
+
 export default {
   name: "App",
   data() {
+    // не должны быть свойств значение которых можно вычислить исходя из текущего состояния
     return  {
-      ticker: 'BTS',
+      ticker: '',
+      filter: '',
+      isTicker: '',
+
       tickers: [],
       tickersName: [],
       normalizeTickersName: [],
-      isTicker: '',
-      sel: null,
+      selectedTicker: null,
       graph: [],
+
       page: 1,
-      filter: '',
-      hasNextPage: true
     }
   },
   created: async function () {
@@ -219,14 +237,52 @@ export default {
       this.tickersName.push(key)
     }
   },
-  methods: {
-    filteredTickers() {
-      const start = (this.page - 1) * 6
-      const end = this.page * 6 
-      const filteredTickers = this.tickers.filter(ticker => ticker.name.includes(this.filter.toUpperCase()))
-      this.hasNextPage = filteredTickers.length > end
-      return filteredTickers.slice(start, end)
+  computed: {
+    //vue кэширует работу методов расположенных в computed
+    //т.е. будет вызываться только при изменении данных используемых в функции
+    //computed это не функции, а поля и никогда не принимают данные на вход
+    //computed от слова считать вот данные и нужно их расчитать
+    //поэтому не должно быть присваиваний
+
+    //ЛЮБОЕ ЗАВИСИМОЕ СОСТОЯНИЕ КЛАДЕТСЯ В COMPUTED
+
+    startIndex() {
+      return (this.page - 1) * 6
     },
+    endIndex() {
+      return this.page * 6
+    },
+    filteredTickers() {
+      return this.tickers.filter(ticker => ticker.name.includes(this.filter.toUpperCase()))
+    },
+    paginatedTickers() {
+      return this.filteredTickers.slice(this.startIndex, this.endIndex)
+    },
+    hasNextPage() {
+      return this.filteredTickers.length > this.endIndex
+    },
+    maxValue() {
+      return Math.max(...this.graph);
+    },
+    minValue() {
+      return Math.min(...this.graph);
+    },
+    normalizedGraph() {
+      if (this.maxValue === this.minValue) {
+        return this.graph.map(() => 50)
+      }
+      return this.graph.map(
+        price => 5 + ((price - this.minValue) * 95) / (this.maxValue - this.minValue)
+      );
+    },
+    pageStateOptions() {
+      return {
+        filter: this.filter,
+        page: this.page
+      }
+    }
+  },
+  methods: {
      subscribeToUpdates(tickerName) {
         // setInterval(async () => {
         //   let tickerAPI = await fetch(
@@ -237,9 +293,10 @@ export default {
         //     ? tickerAPI.USD?.toFixed(2)
         //     : tickerAPI.USD?.toPrecision(2);
 
-        //   (this.sel?.name === tickerName) && (this.graph.unshift(this.tickers.find(t => t.name === tickerName).price))
+        //   (this.selectedTicker?.name === tickerName) && (this.graph.unshift(this.tickers.find(t => t.name === tickerName).price))
         // }, 5000);
-      this.ticker = tickerName
+        tickerName
+      this.ticker = ''
      },
     add(tickerAdd) {
       tickerAdd = tickerAdd.toUpperCase()
@@ -249,7 +306,7 @@ export default {
           name: tickerAdd,
           price: '-'
         }
-        this.tickers.push(currentTicker)
+        this.tickers = [...this.tickers, currentTicker]
         localStorage.setItem("cryptonomicon-list", JSON.stringify(this.tickers));
         this.subscribeToUpdates(tickerAdd)
       }
@@ -259,20 +316,14 @@ export default {
           : (this.isTicker = 'Нет такого тикера')
       }
     },
-    del(currentTicker) {
-      this.tickers = this.tickers.filter(item => item != currentTicker)
-      localStorage.setItem("cryptonomicon-list", JSON.stringify(this.tickers));
+    del(tickerToRemove) {
+      this.tickers = this.tickers.filter(item => item != tickerToRemove)
+      if (this.selectedTicker === tickerToRemove){
+        this.selectedTicker = null
+      }
     },
     select(selectTicker) {
-      this.sel = selectTicker
-      this.graph = []
-    },
-    normalizeGraph() {
-      const maxValue = Math.max(...this.graph);
-      const minValue = Math.min(...this.graph);
-      return this.graph.map(
-        price => 5 + ((price - minValue) * 95) / (maxValue - minValue)
-      );
+      this.selectedTicker = selectTicker
     },
     normalizeTickers() {
       let reg = new RegExp(this.ticker, 'i')
@@ -290,19 +341,26 @@ export default {
     }
   },
   watch: {
+    //когда меняется нужно сделать
+    selectedTicker() {
+      this.graph = []
+    },
+    tickers() {
+      localStorage.setItem("cryptonomicon-list", JSON.stringify(this.tickers));
+    },
+    paginatedTickers(){
+      if (this.paginatedTickers.length === 0 && this.page > 1) {
+        this.page -= 1
+      }
+    },
     filter() {
       this.page = 1
-      window.history.pushState(
-         null,
-         document.title,
-         `${window.location.pathname}?filter=${this.filter}&page=${this.page}`
-      )
     },
-    page() {
+    pageStateOptions(v) {
       window.history.pushState(
          null,
          document.title,
-         `${window.location.pathname}?filter=${this.filter}&page=${this.page}`
+         `${window.location.pathname}?filter=${v.filter}&page=${v.page}`
       )
     }
   }
